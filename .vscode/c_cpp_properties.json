@@ -1,0 +1,47 @@
+{
+  "version": 4,
+  "configurations": [
+    {
+      "name": "Win64-Qt514-MinGW73",
+      "intelliSenseMode": "windows-gcc-x64",
+      "compilerPath": "E:/Qt/Tools/mingw730_64/bin/g++.exe",
+      "cStandard": "c11",
+      "cppStandard": "c++17",
+      "defines": [
+        "UNICODE",
+        "_UNICODE",
+        "WIN32",
+        "QT_CORE_LIB",
+        "QT_GUI_LIB",
+        "QT_WIDGETS_LIB",
+        "QT_PRINTSUPPORT_LIB"
+      ],
+      "includePath": [
+        "${workspaceFolder}",
+        "${workspaceFolder}/src",
+        "${workspaceFolder}/include",
+        "${workspaceFolder}/ui",
+        "${workspaceFolder}/build",
+        "${workspaceFolder}/build/release",
+        "E:/Qt/5.14.2/mingw73_64/include",
+        "E:/Qt/5.14.2/mingw73_64/include/QtCore",
+        "E:/Qt/5.14.2/mingw73_64/include/QtGui",
+        "E:/Qt/5.14.2/mingw73_64/include/QtWidgets",
+        "E:/Qt/5.14.2/mingw73_64/include/QtPrintSupport",
+        "E:/E_EngineeringWarehouse/202604/RTSP_MQTT_QtOfficial_OneShot/third_party/paho/install/include"
+      ],
+      "browse": {
+        "path": [
+          "${workspaceFolder}",
+          "${workspaceFolder}/src",
+          "${workspaceFolder}/include",
+          "${workspaceFolder}/ui",
+          "${workspaceFolder}/build/release",
+          "E:/Qt/5.14.2/mingw73_64/include",
+          "E:/E_EngineeringWarehouse/202604/RTSP_MQTT_QtOfficial_OneShot/third_party/paho/install/include"
+        ],
+        "limitSymbolsToIncludedHeaders": true
+      }
+    }
+  ]
+}

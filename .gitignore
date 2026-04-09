@@ -1,0 +1,26 @@
+# Qt / qmake build outputs
+build/
+**/Makefile
+**/Makefile.Debug
+**/Makefile.Release
+**/.qmake.stash
+**/moc_*.cpp
+**/moc_*.o
+**/qrc_*.cpp
+**/ui_*.h
+**/*.o
+**/*.obj
+**/*.exe
+**/*.ilk
+**/*.pdb
+
+# Qt Creator / user local
+*.pro.user
+*.pro.user.*
+
+# VS Code local noise
+.vscode/*.log
+
+# OS
+.DS_Store
+Thumbs.db
