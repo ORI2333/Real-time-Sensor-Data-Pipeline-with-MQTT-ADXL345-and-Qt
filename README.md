@@ -238,3 +238,32 @@ git add src include ui tools .vscode EEN1071Ass2.pro README.md .gitignore
 git commit -m "feat: <你的变更说明>"
 ```
 
+## 软件打包（给客户直接使用）
+
+已提供一键打包脚本：
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\package_qt.ps1
+```
+
+也可在 VS Code 任务中执行：
+
+- `Qt: package portable zip`
+
+打包输出：
+
+- `dist/MQTTADXL345-portable/`：可直接运行目录
+- `dist/MQTTADXL345-portable.zip`：可分发压缩包
+- 主程序名称：`MQTTADXL345.exe`
+
+分发建议：
+
+1. 发送 `MQTTADXL345-portable.zip` 给客户。
+2. 客户解压后双击 `run.bat`（或 `MQTTADXL345.exe`）。
+3. 首次使用若提示 Broker 不可达，可按界面提示安装/启动 Mosquitto。
+
+说明：
+
+- 脚本会自动执行 `windeployqt` 收集 Qt 运行库。
+- 脚本会尝试拷贝 Paho MQTT 运行时 DLL（若存在）。
+

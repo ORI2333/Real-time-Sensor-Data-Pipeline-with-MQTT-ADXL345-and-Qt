@@ -4,7 +4,7 @@
 #-------------------------------------------------------------------------
 
 # Add essential Qt modules: core logic and GUI elements
-QT       += core gui widgets printsupport
+QT       += core gui widgets printsupport network
 
 # Ensure compatibility with newer Qt versions by explicitly adding the widgets module
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
@@ -43,6 +43,10 @@ INCLUDEPATH += \
     src \
     ui
 
+win32 {
+    RC_ICONS = assets/app_icon.ico
+}
+
 # External Library Linking: Links the Paho MQTT C client library
 # (Required for IoT/Messaging functionality in this assignment)
 LIBS  += -lpaho-mqtt3c
@@ -53,4 +57,6 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
 
 DISTFILES += \
-    README.md
+    README.md \
+    assets/app_icon.ico \
+    assets/README.md

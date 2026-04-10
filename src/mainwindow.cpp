@@ -5,16 +5,55 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QJsonValue>
+#include <QMessageBox>
 #include <QMetaObject>
+#include <QProcess>
 #include <QSignalBlocker>
+#include <QTcpSocket>
+#include <QPushButton>
+#include <QClipboard>
 #include <QTime>
+#include <QUrl>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QTimer>
 #include <QFont>
+#include <QVBoxLayout>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QSizePolicy>
+#include <QGroupBox>
+#include <QSplitter>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
+#include <QStyle>
 #include <limits>
 
 namespace {
+constexpr double kStatsWindowSec = 60.0;
+constexpr double kHistoryWindowSec = 600.0;
+
+QStringList supportedMetricKeys()
+{
+    return QStringList() << "pitch"
+                         << "roll"
+                         << "x"
+                         << "y"
+                         << "z"
+                         << "cpu_temp"
+                         << "cpu_load";
+}
+
+QString normalizeBrokerUri(const QString &broker)
+{
+    const QString trimmed = broker.trimmed();
+    if (trimmed.startsWith("mqtt://", Qt::CaseInsensitive)) {
+        return QString("tcp://") + trimmed.mid(7);
+    }
+    return trimmed;
+}
+
 bool readDoubleByPath(const QJsonObject &root, const QString &path, double *out)
 {
     QJsonValue current(root);
@@ -40,6 +79,182 @@ bool readDoubleByPath(const QJsonObject &root, const QString &path, double *out)
     }
     return false;
 }
+
+QString metricUnit(const QString &metric)
+{
+    if (metric == "pitch" || metric == "roll") {
+        return "deg";
+    }
+    if (metric == "x" || metric == "y" || metric == "z") {
+        return "mg";
+    }
+    if (metric == "cpu_temp") {
+        return "C";
+    }
+    if (metric == "cpu_load") {
+        return "%";
+    }
+    return "";
+}
+
+QString metricDisplayName(const QString &metric)
+{
+    if (metric == "pitch") {
+        return "俯仰角";
+    }
+    if (metric == "roll") {
+        return "横滚角";
+    }
+    if (metric == "x") {
+        return "X 轴加速度";
+    }
+    if (metric == "y") {
+        return "Y 轴加速度";
+    }
+    if (metric == "z") {
+        return "Z 轴加速度";
+    }
+    if (metric == "cpu_temp") {
+        return "CPU 温度";
+    }
+    if (metric == "cpu_load") {
+        return "CPU 负载";
+    }
+    return metric;
+}
+
+QString metricAxisLabel(const QString &metric)
+{
+    const QString unit = metricUnit(metric);
+    if (unit.isEmpty()) {
+        return metricDisplayName(metric);
+    }
+    return QString("%1 (%2)").arg(metricDisplayName(metric), unit);
+}
+
+QString findCustomIconPath()
+{
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(appDir).filePath("app_icon.ico"),
+        QDir(appDir).filePath("app_icon.png"),
+        QDir(appDir).filePath("assets/app_icon.ico"),
+        QDir(appDir).filePath("assets/app_icon.png"),
+        QDir(appDir).filePath("../../assets/app_icon.ico"),
+        QDir(appDir).filePath("../../assets/app_icon.png")
+    };
+    for (const QString &path : candidates) {
+        if (QFileInfo::exists(path)) {
+            return path;
+        }
+    }
+    return QString();
+}
+
+bool parseJsonPayload(const QString &text, QByteArray *outCompactJson, QString *error)
+{
+    QJsonParseError parseError;
+    const QByteArray raw = text.trimmed().toUtf8();
+    if (raw.isEmpty()) {
+        if (error) {
+            *error = "发布内容为空，请输入 JSON。";
+        }
+        return false;
+    }
+
+    const QJsonDocument doc = QJsonDocument::fromJson(raw, &parseError);
+    if (parseError.error != QJsonParseError::NoError || doc.isNull()) {
+        if (error) {
+            *error = QString("JSON 解析失败：%1").arg(parseError.errorString());
+        }
+        return false;
+    }
+
+    if (outCompactJson) {
+        *outCompactJson = doc.toJson(QJsonDocument::Compact);
+    }
+    return true;
+}
+
+bool checkBrokerReachable(const QString &broker, QString *hint)
+{
+    const QUrl url(normalizeBrokerUri(broker));
+    if (!url.isValid() || url.scheme().toLower() != "tcp") {
+        return true;
+    }
+
+    const QString host = url.host().trimmed();
+    const int port = url.port(1883);
+    if (host.isEmpty() || port <= 0) {
+        return true;
+    }
+
+    QTcpSocket socket;
+    socket.connectToHost(host, static_cast<quint16>(port));
+    const bool ok = socket.waitForConnected(3000);
+    if (ok) {
+        socket.disconnectFromHost();
+        return true;
+    }
+
+    if (hint) {
+        const bool isLocal = (host == "127.0.0.1" || host == "localhost" || host == "::1");
+        if (isLocal && port == 1883) {
+            *hint =
+                "未连接到本地 MQTT Broker (192.168.127.152:1883)。\n"
+                "可能 Mosquitto 服务未启动。\n\n"
+                "请在 PowerShell 执行：\n"
+                "Start-Service mosquitto\n"
+                "Get-NetTCPConnection -LocalPort 1883 -State Listen";
+        } else {
+            *hint = QString("无法连接到 Broker：%1:%2\n请检查地址、端口和网络连通性。")
+                        .arg(host)
+                        .arg(port);
+        }
+    }
+    return false;
+}
+
+bool isLocalDefaultBroker(const QString &broker)
+{
+    const QUrl url(normalizeBrokerUri(broker));
+    if (!url.isValid() || url.scheme().toLower() != "tcp") {
+        return false;
+    }
+    const QString host = url.host().trimmed().toLower();
+    const int port = url.port(1883);
+    const bool isLocalHost = (host == "127.0.0.1" || host == "localhost" || host == "::1");
+    return isLocalHost && port == 1883;
+}
+
+bool hasMosquittoService()
+{
+    QProcess proc;
+    proc.start("sc", QStringList() << "query" << "mosquitto");
+    if (!proc.waitForFinished(1200)) {
+        proc.kill();
+        return false;
+    }
+    return proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0;
+}
+
+void runElevatedPowerShell(const QString &command)
+{
+    QString escaped = command;
+    escaped.replace("`", "``");
+    escaped.replace("\"", "`\"");
+
+    const QString launcher =
+        QString("Start-Process PowerShell -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -Command \"%1\"'")
+            .arg(escaped);
+
+    QProcess::startDetached("powershell", QStringList()
+                                          << "-NoProfile"
+                                          << "-ExecutionPolicy"
+                                          << "Bypass"
+                                          << "-Command"
+                                          << launcher);
+}
 }
 
 /**
@@ -52,7 +267,8 @@ MainWindow::MainWindow(QWidget *parent) :
 {
     ui->setupUi(this);
 
-    setMinimumSize(1040, 760);
+    setMinimumSize(1160, 760);
+    resize(1280, 800);
     setStyleSheet(
         "QMainWindow {"
         "  background: #f3f6fb;"
@@ -90,6 +306,24 @@ MainWindow::MainWindow(QWidget *parent) :
         "QPushButton#subscribeButton {"
         "  background: #0f766e;"
         "}"
+        "QPushButton#publishButton {"
+        "  background: #0ea5a4;"
+        "}"
+        "QPushButton#publishButton:hover {"
+        "  background: #0f766e;"
+        "}"
+        "QPushButton#connectButton[connectedState=\"false\"] {"
+        "  background: #2563eb;"
+        "}"
+        "QPushButton#connectButton[connectedState=\"false\"]:hover {"
+        "  background: #1d4ed8;"
+        "}"
+        "QPushButton#connectButton[connectedState=\"true\"] {"
+        "  background: #16a34a;"
+        "}"
+        "QPushButton#connectButton[connectedState=\"true\"]:hover {"
+        "  background: #15803d;"
+        "}"
         "QPlainTextEdit {"
         "  background: #ffffff;"
         "  border: 1px solid #d0d5dd;"
@@ -97,11 +331,44 @@ MainWindow::MainWindow(QWidget *parent) :
         "  padding: 8px;"
         "  color: #111827;"
         "}"
+        "QGroupBox {"
+        "  border: 1px solid #d0d5dd;"
+        "  border-radius: 12px;"
+        "  margin-top: 10px;"
+        "  background: #f8fafc;"
+        "}"
+        "QGroupBox::title {"
+        "  subcontrol-origin: margin;"
+        "  left: 12px;"
+        "  padding: 0 6px;"
+        "  color: #334155;"
+        "  font-weight: 700;"
+        "}"
     );
 
     connected_ = false;
     client = nullptr;
     currentTopic_ = DEFAULT_TOPIC;
+    lwtTopic_ = DEFAULT_LWT_TOPIC;
+    selectedSubQos_ = DEFAULT_QOS;
+    selectedPubQos_ = DEFAULT_QOS;
+    subQosLabel_ = nullptr;
+    topicCombo_ = nullptr;
+    subQosCombo_ = nullptr;
+    lwtTopicLabel_ = nullptr;
+    lwtTopicCombo_ = nullptr;
+    lwtQosLabel_ = nullptr;
+    lwtQosCombo_ = nullptr;
+    pubTopicLabel_ = nullptr;
+    pubTopicCombo_ = nullptr;
+    pubQosLabel_ = nullptr;
+    pubQosCombo_ = nullptr;
+    pubPayloadLabel_ = nullptr;
+    pubPayloadEdit_ = nullptr;
+    publishButton_ = nullptr;
+    clearCacheButton_ = nullptr;
+    passwordToggleButton_ = nullptr;
+    deviceStateLabel_ = nullptr;
 
     ui->brokerLabel->setText("Broker 地址");
     ui->clientIdLabel->setText("客户端 ID");
@@ -112,20 +379,167 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->connectButton->setText("连接");
     ui->disconnectButton->setText("断开");
     ui->subscribeButton->setText("订阅主题");
-    ui->statusShadowLabel->setText("接收消息需为 JSON 格式，请手动选择主题与指标。");
+    ui->statusShadowLabel->setText("数据主题与遗嘱主题支持独立配置；遗嘱默认订阅 sensor/adxl345/status。 ");
+    ui->connectButton->setProperty("connectedState", false);
 
     ui->brokerEdit->setText(DEFAULT_ADDRESS);
     ui->clientIdEdit->setText(DEFAULT_CLIENTID);
     ui->usernameEdit->setText(DEFAULT_AUTHMETHOD);
     ui->passwordEdit->setText(DEFAULT_AUTHTOKEN);
     ui->passwordEdit->setEchoMode(QLineEdit::Password);
-    ui->topicEdit->setText(DEFAULT_TOPIC);
+    ui->passwordEdit->setClearButtonEnabled(true);
     ui->brokerEdit->setPlaceholderText("例如：tcp://127.0.0.1:1883");
-    ui->topicEdit->setPlaceholderText("例如：een1071/sensor/adxl345");
     ui->outputText->setPlaceholderText("运行日志会显示在这里...");
 
+    ui->brokerEdit->setMinimumWidth(280);
+    ui->clientIdEdit->setMinimumWidth(220);
+    ui->usernameEdit->setMinimumWidth(180);
+    ui->passwordEdit->setMinimumWidth(220);
+    ui->metricCombo->setMinimumWidth(190);
+    ui->metricCombo->setMinimumContentsLength(14);
+
+    ui->brokerEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    ui->clientIdEdit->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    ui->usernameEdit->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    ui->passwordEdit->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Fixed);
+    ui->metricCombo->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+
+    topicCombo_ = new QComboBox(ui->centralWidget);
+    topicCombo_->setEditable(true);
+    topicCombo_->setInsertPolicy(QComboBox::NoInsert);
+    topicCombo_->setMinimumWidth(420);
+    topicCombo_->setMinimumContentsLength(22);
+    topicCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    topicCombo_->addItem(DEFAULT_TOPIC);
+    topicCombo_->addItem("mqttx_local_test");
+    topicCombo_->addItem("een1071/gui/status");
+    topicCombo_->setCurrentText(DEFAULT_TOPIC);
+    topicCombo_->setToolTip("可下拉选择，也可手动输入任意主题");
+    topicCombo_->setStyleSheet(
+        "QComboBox {"
+        "  background: #ffffff;"
+        "  border: 1px solid #d0d5dd;"
+        "  border-radius: 8px;"
+        "  padding: 4px 8px;"
+        "  min-height: 26px;"
+        "}"
+        "QComboBox:focus {"
+        "  border: 1px solid #2e90fa;"
+        "}");
+    ui->topicEdit->setVisible(false);
+
     setWindowTitle("MQTT ADXL345 实时监控面板");
-    setupPlot();
+    const QString iconPath = findCustomIconPath();
+    if (!iconPath.isEmpty()) {
+        setWindowIcon(QIcon(iconPath));
+    } else {
+        setWindowIcon(style()->standardIcon(QStyle::SP_ComputerIcon));
+    }
+
+    subQosLabel_ = new QLabel("接收 QoS", ui->centralWidget);
+    subQosCombo_ = new QComboBox(ui->centralWidget);
+    subQosCombo_->addItem("0 - 至多一次", 0);
+    subQosCombo_->addItem("1 - 至少一次", 1);
+    subQosCombo_->addItem("2 - 只有一次", 2);
+    subQosCombo_->setCurrentIndex(subQosCombo_->findData(DEFAULT_QOS));
+    subQosCombo_->setMinimumWidth(150);
+    subQosCombo_->setMinimumContentsLength(12);
+
+    lwtTopicLabel_ = new QLabel("遗嘱主题", ui->centralWidget);
+    lwtTopicCombo_ = new QComboBox(ui->centralWidget);
+    lwtTopicCombo_->setEditable(true);
+    lwtTopicCombo_->setInsertPolicy(QComboBox::NoInsert);
+    lwtTopicCombo_->setMinimumWidth(260);
+    lwtTopicCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    lwtTopicCombo_->setToolTip("独立设置遗嘱主题；为空时默认使用 sensor/adxl345/status");
+
+    lwtQosLabel_ = new QLabel("遗嘱 QoS", ui->centralWidget);
+    lwtQosCombo_ = new QComboBox(ui->centralWidget);
+    lwtQosCombo_->addItem("0 - 至多一次", 0);
+    lwtQosCombo_->addItem("1 - 至少一次", 1);
+    lwtQosCombo_->addItem("2 - 只有一次", 2);
+    lwtQosCombo_->setCurrentIndex(lwtQosCombo_->findData(DEFAULT_QOS));
+    lwtQosCombo_->setMinimumWidth(120);
+
+    deviceStateLabel_ = new QLabel("设备状态：未连接", ui->centralWidget);
+    deviceStateLabel_->setStyleSheet("QLabel { color: #475467; font-weight: 700; }");
+
+    pubTopicLabel_ = new QLabel("发布主题", ui->centralWidget);
+    pubTopicCombo_ = new QComboBox(ui->centralWidget);
+    pubTopicCombo_->setEditable(true);
+    pubTopicCombo_->setInsertPolicy(QComboBox::NoInsert);
+    pubTopicCombo_->setMinimumWidth(260);
+    pubTopicCombo_->setMinimumContentsLength(16);
+    pubTopicCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    pubTopicCombo_->addItem(DEFAULT_TOPIC);
+    pubTopicCombo_->addItem("een1071/gui/status");
+    pubTopicCombo_->addItem("mqttx_local_test");
+    pubTopicCombo_->setCurrentText(DEFAULT_TOPIC);
+    pubTopicCombo_->setToolTip("选择或手动输入发布主题");
+
+    pubQosLabel_ = new QLabel("发送 QoS", ui->centralWidget);
+    pubQosCombo_ = new QComboBox(ui->centralWidget);
+    pubQosCombo_->addItem("0 - 至多一次", 0);
+    pubQosCombo_->addItem("1 - 至少一次", 1);
+    pubQosCombo_->addItem("2 - 只有一次", 2);
+    pubQosCombo_->setCurrentIndex(pubQosCombo_->findData(DEFAULT_QOS));
+    pubQosCombo_->setMinimumWidth(120);
+    pubQosCombo_->setMinimumContentsLength(12);
+
+    publishButton_ = new QPushButton("发布 JSON", ui->centralWidget);
+    publishButton_->setObjectName("publishButton");
+    publishButton_->setMinimumWidth(120);
+
+    clearCacheButton_ = new QPushButton("清除数据缓存", ui->centralWidget);
+    clearCacheButton_->setObjectName("clearCacheButton");
+    clearCacheButton_->setMinimumWidth(128);
+    clearCacheButton_->setToolTip("清空指标缓存、图形曲线与统计数据");
+
+    pubPayloadLabel_ = new QLabel("发布内容(JSON)", ui->centralWidget);
+    pubPayloadEdit_ = new QPlainTextEdit(ui->centralWidget);
+    pubPayloadEdit_->setPlaceholderText("请输入 JSON，例如：{\"accel_x\":-129,\"accel_y\":-193,\"accel_z\":-76,\"cpu_load\":0,\"cpu_temp_c\":51.8,\"pitch\":-31.8,\"roll\":-52.1,\"timestamp\":\"2026-04-10T07:17:46Z\"}");
+    pubPayloadEdit_->setMinimumHeight(100);
+    pubPayloadEdit_->setMaximumHeight(128);
+    pubPayloadEdit_->setPlainText("{\n  \"accel_x\": -129,\n  \"accel_y\": -193,\n  \"accel_z\": -76,\n  \"cpu_load\": 0,\n  \"cpu_temp_c\": 51.799999237060547,\n  \"pitch\": -31.877994537353516,\n  \"roll\": -52.196861267089844,\n  \"timestamp\": \"2026-04-10T07:17:46Z\"\n}");
+
+    passwordToggleButton_ = new QToolButton(ui->centralWidget);
+    passwordToggleButton_->setText("显示");
+    passwordToggleButton_->setCheckable(true);
+    passwordToggleButton_->setCursor(Qt::PointingHandCursor);
+    passwordToggleButton_->setToolTip("切换密码明文/隐藏");
+    passwordToggleButton_->setStyleSheet(
+        "QToolButton {"
+        "  color: #2563eb;"
+        "  background: transparent;"
+        "  border: none;"
+        "  font-weight: 600;"
+        "  padding: 0 4px;"
+        "}"
+        "QToolButton:hover {"
+        "  color: #1d4ed8;"
+        "}");
+
+    connect(passwordToggleButton_, &QToolButton::toggled, this, [this](bool checked) {
+        ui->passwordEdit->setEchoMode(checked ? QLineEdit::Normal : QLineEdit::Password);
+        passwordToggleButton_->setText(checked ? "隐藏" : "显示");
+    });
+    connect(subQosCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
+        selectedSubQos_ = subQosCombo_->currentData().toInt();
+    });
+    connect(pubQosCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
+        selectedPubQos_ = pubQosCombo_->currentData().toInt();
+    });
+    connect(publishButton_, &QPushButton::clicked, this, [this]() { publishJsonMessage(); });
+    connect(clearCacheButton_, &QPushButton::clicked, this, [this]() { clearDataCache(); });
+
+    setupResponsiveLayout();
+
+    if (lwtTopicCombo_) {
+        lwtTopicCombo_->addItem(lwtTopic_);
+        lwtTopicCombo_->setCurrentText(lwtTopic_);
+    }
+
+    updateConnectionUi(false);
 
     {
         QSignalBlocker blocker(ui->metricCombo);
@@ -139,6 +553,7 @@ MainWindow::MainWindow(QWidget *parent) :
         ui->metricCombo->addItem("CPU 负载 (cpu_load)", "cpu_load");
     }
     currentMetric_ = ui->metricCombo->currentData().toString();
+    setupPlot();
 
     // Ensure the window is visible on the primary display and focused.
     if (QGuiApplication::primaryScreen()) {
@@ -152,8 +567,13 @@ MainWindow::MainWindow(QWidget *parent) :
         activateWindow();
     });
 
-    QObject::connect(this, SIGNAL(messageSignal(QString)), this, SLOT(on_MQTTmessage(QString)));
+    QObject::connect(this, &MainWindow::messageSignal, this, &MainWindow::on_MQTTmessage);
     appendLog("应用已启动。请配置连接参数并点击“连接”。");
+    if (!iconPath.isEmpty()) {
+        appendLog(QString("已加载自定义图标：%1").arg(iconPath));
+    } else {
+        appendLog("未检测到自定义图标。可在 assets/app_icon.ico 或 assets/app_icon.png 放置图标后重启应用生效。");
+    }
 }
 
 MainWindow::~MainWindow()
@@ -173,6 +593,18 @@ void MainWindow::appendLog(const QString &line)
     const QString ts = QDateTime::currentDateTime().toString("HH:mm:ss");
     ui->outputText->appendPlainText(QString("[%1] %2").arg(ts, line));
     ui->outputText->ensureCursorVisible();
+}
+
+void MainWindow::updateConnectionUi(bool connected)
+{
+    if (!ui || !ui->connectButton) {
+        return;
+    }
+
+    ui->connectButton->setProperty("connectedState", connected);
+    ui->connectButton->style()->unpolish(ui->connectButton);
+    ui->connectButton->style()->polish(ui->connectButton);
+    ui->connectButton->update();
 }
 
 void MainWindow::setupPlot()
@@ -197,16 +629,145 @@ void MainWindow::setupPlot()
     ui->customPlot->xAxis->grid()->setSubGridVisible(false);
     ui->customPlot->yAxis->grid()->setSubGridVisible(false);
 
-    QSharedPointer<QCPAxisTickerTime> timeTicker(new QCPAxisTickerTime);
-    timeTicker->setTimeFormat("%h:%m:%s");
+    QSharedPointer<QCPAxisTickerDateTime> timeTicker(new QCPAxisTickerDateTime);
+    timeTicker->setDateTimeFormat("HH:mm:ss");
+    timeTicker->setDateTimeSpec(Qt::LocalTime);
     ui->customPlot->xAxis->setTicker(timeTicker);
-    ui->customPlot->xAxis->setLabel("时间");
-    ui->customPlot->yAxis->setLabel("数值");
+    ui->customPlot->xAxis->setLabel("时间 (HH:mm:ss)");
+    ui->customPlot->yAxis->setLabel(metricAxisLabel(currentMetric_));
     ui->customPlot->xAxis->setRange(QDateTime::currentSecsSinceEpoch() - 60, QDateTime::currentSecsSinceEpoch());
     ui->customPlot->yAxis->setRange(-10, 10);
     ui->customPlot->replot();
 
     ui->statsLabel->setText("最近 60 秒统计：平均值=N/A，最小值=N/A，最大值=N/A");
+}
+
+void MainWindow::setupResponsiveLayout()
+{
+    QVBoxLayout *rootLayout = new QVBoxLayout(ui->centralWidget);
+    rootLayout->setContentsMargins(20, 20, 20, 20);
+    rootLayout->setSpacing(10);
+
+    QGroupBox *connBox = new QGroupBox("连接参数", ui->centralWidget);
+    QGroupBox *subBox = new QGroupBox("订阅设置", ui->centralWidget);
+    QGroupBox *pubBox = new QGroupBox("发布(JSON)", ui->centralWidget);
+    QGroupBox *chartBox = new QGroupBox("实时图形", ui->centralWidget);
+    QGroupBox *logBox = new QGroupBox("运行日志", ui->centralWidget);
+
+    connBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    subBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    pubBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    chartBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    logBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    QGridLayout *connLayout = new QGridLayout();
+    connLayout->setContentsMargins(12, 10, 12, 12);
+    connLayout->setHorizontalSpacing(10);
+    connLayout->setVerticalSpacing(6);
+
+    connLayout->addWidget(ui->brokerLabel, 0, 0);
+    connLayout->addWidget(ui->brokerEdit, 0, 1);
+    connLayout->addWidget(ui->clientIdLabel, 0, 2);
+    connLayout->addWidget(ui->clientIdEdit, 0, 3);
+    connLayout->addWidget(ui->usernameLabel, 1, 0);
+    connLayout->addWidget(ui->usernameEdit, 1, 1);
+    connLayout->addWidget(ui->passwordLabel, 1, 2);
+
+    QHBoxLayout *passwordLayout = new QHBoxLayout();
+    passwordLayout->setContentsMargins(0, 0, 0, 0);
+    passwordLayout->setSpacing(6);
+    passwordLayout->addWidget(ui->passwordEdit, 1);
+    passwordLayout->addWidget(passwordToggleButton_);
+    connLayout->addLayout(passwordLayout, 1, 3);
+
+    connLayout->setColumnStretch(1, 5);
+    connLayout->setColumnStretch(3, 5);
+    connBox->setLayout(connLayout);
+
+    QGridLayout *actionLayout = new QGridLayout();
+    actionLayout->setContentsMargins(12, 10, 12, 12);
+    actionLayout->setHorizontalSpacing(10);
+    actionLayout->setVerticalSpacing(6);
+    actionLayout->addWidget(ui->topicLabel, 0, 0);
+    actionLayout->addWidget(topicCombo_, 0, 1);
+    actionLayout->addWidget(ui->subscribeButton, 0, 2);
+    actionLayout->addWidget(ui->connectButton, 0, 3);
+    actionLayout->addWidget(ui->disconnectButton, 0, 4);
+
+    actionLayout->addWidget(ui->metricLabel, 1, 0);
+    actionLayout->addWidget(ui->metricCombo, 1, 1);
+    actionLayout->addWidget(subQosLabel_, 1, 2);
+    actionLayout->addWidget(subQosCombo_, 1, 3);
+    actionLayout->addWidget(deviceStateLabel_, 1, 4);
+    actionLayout->addWidget(clearCacheButton_, 1, 5);
+
+    actionLayout->addWidget(lwtTopicLabel_, 2, 0);
+    actionLayout->addWidget(lwtTopicCombo_, 2, 1);
+    actionLayout->addWidget(lwtQosLabel_, 2, 2);
+    actionLayout->addWidget(lwtQosCombo_, 2, 3);
+
+    actionLayout->setColumnStretch(1, 8);
+    actionLayout->setColumnStretch(4, 2);
+    actionLayout->setColumnStretch(5, 2);
+    subBox->setLayout(actionLayout);
+
+    QVBoxLayout *chartLayout = new QVBoxLayout();
+    chartLayout->setContentsMargins(12, 10, 12, 12);
+    chartLayout->setSpacing(8);
+    chartLayout->addWidget(ui->customPlot, 1);
+    chartLayout->addWidget(ui->statsLabel);
+    chartBox->setLayout(chartLayout);
+
+    QGridLayout *publishLayout = new QGridLayout();
+    publishLayout->setContentsMargins(12, 10, 12, 12);
+    publishLayout->setHorizontalSpacing(10);
+    publishLayout->setVerticalSpacing(8);
+    publishLayout->addWidget(pubTopicLabel_, 0, 0);
+    publishLayout->addWidget(pubTopicCombo_, 0, 1, 1, 4);
+    publishLayout->addWidget(pubQosLabel_, 1, 0);
+    publishLayout->addWidget(pubQosCombo_, 1, 1);
+    publishLayout->addWidget(publishButton_, 1, 4);
+    publishLayout->addWidget(pubPayloadLabel_, 2, 0);
+    publishLayout->addWidget(pubPayloadEdit_, 2, 1, 1, 4);
+    publishLayout->setColumnStretch(1, 6);
+    publishLayout->setColumnStretch(2, 1);
+    publishLayout->setColumnStretch(3, 1);
+    pubBox->setLayout(publishLayout);
+
+    QVBoxLayout *logLayout = new QVBoxLayout();
+    logLayout->setContentsMargins(12, 10, 12, 12);
+    logLayout->setSpacing(8);
+    logLayout->addWidget(ui->statusShadowLabel);
+    logLayout->addWidget(ui->outputText, 1);
+    logBox->setLayout(logLayout);
+
+    QVBoxLayout *leftPane = new QVBoxLayout();
+    leftPane->setSpacing(10);
+    leftPane->addWidget(pubBox, 4);
+    leftPane->addWidget(logBox, 6);
+
+    QVBoxLayout *rightPane = new QVBoxLayout();
+    rightPane->setSpacing(10);
+    rightPane->addWidget(chartBox, 1);
+
+    QWidget *leftContainer = new QWidget(ui->centralWidget);
+    leftContainer->setLayout(leftPane);
+    QWidget *rightContainer = new QWidget(ui->centralWidget);
+    rightContainer->setLayout(rightPane);
+
+    QSplitter *contentSplitter = new QSplitter(Qt::Horizontal, ui->centralWidget);
+    contentSplitter->addWidget(leftContainer);
+    contentSplitter->addWidget(rightContainer);
+    contentSplitter->setChildrenCollapsible(false);
+    contentSplitter->setStretchFactor(0, 5);
+    contentSplitter->setStretchFactor(1, 6);
+
+    rootLayout->addWidget(connBox);
+    rootLayout->addWidget(subBox);
+    rootLayout->addWidget(contentSplitter, 1);
+
+    ui->outputText->setMinimumHeight(240);
+    ui->customPlot->setMinimumWidth(520);
 }
 
 void MainWindow::subscribeToTopic(const QString &topic)
@@ -216,50 +777,155 @@ void MainWindow::subscribeToTopic(const QString &topic)
         return;
     }
 
-    if (!currentTopic_.isEmpty()) {
-        MQTTClient_unsubscribe(client, currentTopic_.toUtf8().constData());
-    }
-
     currentTopic_ = topic.trimmed();
     if (currentTopic_.isEmpty()) {
         appendLog("主题为空，请先输入订阅主题。 ");
         return;
     }
 
-    const int rc = MQTTClient_subscribe(client, currentTopic_.toUtf8().constData(), DEFAULT_QOS);
-    appendLog(QString("订阅主题 '%1'，返回码 rc=%2").arg(currentTopic_).arg(rc));
+    lwtTopic_ = lwtTopicCombo_ ? lwtTopicCombo_->currentText().trimmed() : QString();
+    if (lwtTopic_.isEmpty()) {
+        lwtTopic_ = DEFAULT_LWT_TOPIC;
+    }
+
+    if (lwtTopicCombo_ && lwtTopicCombo_->findText(lwtTopic_) < 0) {
+        lwtTopicCombo_->addItem(lwtTopic_);
+    }
+    QStringList targetTopics;
+    targetTopics << currentTopic_ << lwtTopic_;
+    targetTopics.removeDuplicates();
+
+    for (const QString &oldTopic : subscribedTopics_) {
+        if (targetTopics.contains(oldTopic)) {
+            continue;
+        }
+        MQTTClient_unsubscribe(client, oldTopic.toUtf8().constData());
+        appendLog(QString("取消订阅主题 '%1'").arg(oldTopic));
+    }
+
+    if (topicCombo_ && topicCombo_->findText(currentTopic_) < 0) {
+        topicCombo_->addItem(currentTopic_);
+    }
+    if (topicCombo_) {
+        topicCombo_->setCurrentText(currentTopic_);
+    }
+    if (pubTopicCombo_ && pubTopicCombo_->findText(currentTopic_) < 0) {
+        pubTopicCombo_->addItem(currentTopic_);
+    }
+
+    const QHash<QString, int> qosByTopic = {
+        {currentTopic_, selectedSubQos_},
+        {lwtTopic_, lwtQosCombo_ ? lwtQosCombo_->currentData().toInt() : selectedSubQos_}
+    };
+
+    for (const QString &t : targetTopics) {
+        if (subscribedTopics_.contains(t)) {
+            MQTTClient_unsubscribe(client, t.toUtf8().constData());
+        }
+        const int qos = qosByTopic.value(t, selectedSubQos_);
+        const int rc = MQTTClient_subscribe(client, t.toUtf8().constData(), qos);
+        appendLog(QString("订阅主题 '%1' (接收QoS=%2)，返回码 rc=%3").arg(t).arg(qos).arg(rc));
+    }
+
+    subscribedTopics_ = targetTopics;
+    appendLog(QString("已启用两类订阅：数据=%1，遗嘱=%2").arg(currentTopic_, lwtTopic_));
 }
 
-void MainWindow::pushDataPoint(const QDateTime &ts, double value)
+void MainWindow::publishJsonMessage()
+{
+    if (!connected_ || !client) {
+        appendLog("发布已跳过：当前未连接 MQTT。 ");
+        QMessageBox::information(this, "未连接", "请先连接 MQTT Broker，再发布 JSON。 ");
+        return;
+    }
+
+    const QString topic = pubTopicCombo_ ? pubTopicCombo_->currentText().trimmed() : QString();
+    if (topic.isEmpty()) {
+        appendLog("发布失败：发布主题为空。 ");
+        QMessageBox::warning(this, "发布失败", "发布主题为空，请先输入主题。 ");
+        return;
+    }
+
+    QString error;
+    QByteArray payload;
+    const QString payloadText = pubPayloadEdit_ ? pubPayloadEdit_->toPlainText() : QString();
+    if (!parseJsonPayload(payloadText, &payload, &error)) {
+        appendLog(QString("发布失败：%1").arg(error));
+        QMessageBox::warning(this, "发布失败", error);
+        return;
+    }
+
+    MQTTClient_message pubmsg = MQTTClient_message_initializer;
+    pubmsg.payload = payload.data();
+    pubmsg.payloadlen = payload.size();
+    pubmsg.qos = selectedPubQos_;
+    pubmsg.retained = 0;
+
+    MQTTClient_deliveryToken token = 0;
+    const int rc = MQTTClient_publishMessage(client, topic.toUtf8().constData(), &pubmsg, &token);
+    if (rc != MQTTCLIENT_SUCCESS) {
+        appendLog(QString("发布失败：topic='%1'，发送QoS=%2，rc=%3").arg(topic).arg(selectedPubQos_).arg(rc));
+        QMessageBox::warning(this, "发布失败", QString("MQTT 发布失败，rc=%1").arg(rc));
+        return;
+    }
+
+    MQTTClient_waitForCompletion(client, token, TIMEOUT);
+    if (pubTopicCombo_ && pubTopicCombo_->findText(topic) < 0) {
+        pubTopicCombo_->addItem(topic);
+    }
+    if (topicCombo_ && topicCombo_->findText(topic) < 0) {
+        topicCombo_->addItem(topic);
+    }
+
+    appendLog(QString("已发布 JSON：topic='%1'，发送QoS=%2，字节数=%3")
+                  .arg(topic)
+                  .arg(selectedPubQos_)
+                  .arg(payload.size()));
+}
+
+void MainWindow::pushDataPoint(const QString &metric, const QDateTime &ts, double value)
 {
     const double x = ts.toSecsSinceEpoch();
-    ui->customPlot->graph(0)->setName(currentMetric_);
+    QQueue<QPair<double, double>> &history = metricHistory_[metric];
+    history.enqueue(qMakePair(x, value));
+    while (!history.isEmpty() && history.head().first < x - kHistoryWindowSec) {
+        history.dequeue();
+    }
+
+    if (metric != currentMetric_) {
+        return;
+    }
+
+    ui->customPlot->graph(0)->setName(metricAxisLabel(currentMetric_));
     ui->customPlot->graph(0)->addData(x, value);
 
     ui->customPlot->xAxis->setRange(x - 120.0, x + 2.0);
     ui->customPlot->graph(0)->rescaleValueAxis(true, true);
     ui->customPlot->replot();
 
-    updateRollingStats(x, value);
+    updateRollingStats(currentMetric_);
 }
 
-void MainWindow::updateRollingStats(double nowSec, double value)
+void MainWindow::updateRollingStats(const QString &metric)
 {
-    rollingWindow_.enqueue(qMakePair(nowSec, value));
-    while (!rollingWindow_.isEmpty() && rollingWindow_.head().first < nowSec - 60.0) {
-        rollingWindow_.dequeue();
-    }
-
-    if (rollingWindow_.isEmpty()) {
+    const QQueue<QPair<double, double>> history = metricHistory_.value(metric);
+    if (history.isEmpty()) {
         ui->statsLabel->setText("最近 60 秒统计：平均值=N/A，最小值=N/A，最大值=N/A");
         return;
     }
 
+    const double nowSec = history.last().first;
     double sum = 0.0;
+    int count = 0;
     double minVal = std::numeric_limits<double>::max();
     double maxVal = std::numeric_limits<double>::lowest();
-    for (const auto &p : rollingWindow_) {
+
+    for (const auto &p : history) {
+        if (p.first < nowSec - kStatsWindowSec) {
+            continue;
+        }
         sum += p.second;
+        ++count;
         if (p.second < minVal) {
             minVal = p.second;
         }
@@ -267,12 +933,69 @@ void MainWindow::updateRollingStats(double nowSec, double value)
             maxVal = p.second;
         }
     }
-    const double avg = sum / static_cast<double>(rollingWindow_.size());
+
+    if (count == 0) {
+        ui->statsLabel->setText("最近 60 秒统计：平均值=N/A，最小值=N/A，最大值=N/A");
+        return;
+    }
+
+    const double avg = sum / static_cast<double>(count);
+    const QString unit = metricUnit(metric);
+    const QString avgText = unit.isEmpty() ? QString::number(avg, 'f', 3) : QString("%1 %2").arg(avg, 0, 'f', 3).arg(unit);
+    const QString minText = unit.isEmpty() ? QString::number(minVal, 'f', 3) : QString("%1 %2").arg(minVal, 0, 'f', 3).arg(unit);
+    const QString maxText = unit.isEmpty() ? QString::number(maxVal, 'f', 3) : QString("%1 %2").arg(maxVal, 0, 'f', 3).arg(unit);
     ui->statsLabel->setText(
         QString("最近 60 秒统计：平均值=%1，最小值=%2，最大值=%3")
-            .arg(avg, 0, 'f', 3)
-            .arg(minVal, 0, 'f', 3)
-            .arg(maxVal, 0, 'f', 3));
+            .arg(avgText)
+            .arg(minText)
+            .arg(maxText));
+}
+
+void MainWindow::refreshPlotForCurrentMetric()
+{
+    if (!ui->customPlot || ui->customPlot->graphCount() == 0 || !ui->customPlot->graph(0)) {
+        return;
+    }
+
+    ui->customPlot->graph(0)->data()->clear();
+    ui->customPlot->graph(0)->setName(metricAxisLabel(currentMetric_));
+
+    const QQueue<QPair<double, double>> history = metricHistory_.value(currentMetric_);
+    if (history.isEmpty()) {
+        ui->customPlot->xAxis->setRange(QDateTime::currentSecsSinceEpoch() - 60, QDateTime::currentSecsSinceEpoch());
+        ui->customPlot->yAxis->setRange(-10, 10);
+        ui->customPlot->replot();
+        updateRollingStats(currentMetric_);
+        return;
+    }
+
+    for (const auto &p : history) {
+        ui->customPlot->graph(0)->addData(p.first, p.second);
+    }
+
+    const double nowSec = history.last().first;
+    ui->customPlot->xAxis->setRange(nowSec - 120.0, nowSec + 2.0);
+    ui->customPlot->graph(0)->rescaleValueAxis(true, true);
+    ui->customPlot->replot();
+    updateRollingStats(currentMetric_);
+}
+
+void MainWindow::clearDataCache()
+{
+    metricHistory_.clear();
+
+    if (ui && ui->customPlot && ui->customPlot->graphCount() > 0 && ui->customPlot->graph(0)) {
+        ui->customPlot->graph(0)->data()->clear();
+        ui->customPlot->xAxis->setRange(QDateTime::currentSecsSinceEpoch() - 60, QDateTime::currentSecsSinceEpoch());
+        ui->customPlot->yAxis->setRange(-10, 10);
+        ui->customPlot->replot();
+    }
+
+    if (ui && ui->statsLabel) {
+        ui->statsLabel->setText("最近 60 秒统计：平均值=N/A，最小值=N/A，最大值=N/A");
+    }
+
+    appendLog("已清除数据缓存：指标历史、曲线与统计已重置。 ");
 }
 
 double MainWindow::extractMetricValue(const QString &metric, const QByteArray &jsonPayload, bool *ok) const
@@ -291,13 +1014,13 @@ double MainWindow::extractMetricValue(const QString &metric, const QByteArray &j
     } else if (metric == "roll") {
         paths << "roll" << "adxl345.roll" << "adxl.roll" << "sensor.roll";
     } else if (metric == "x") {
-        paths << "x" << "adxl345.x" << "adxl.x" << "sensor.x";
+        paths << "accel_x" << "x" << "adxl345.accel_x" << "adxl345.x" << "adxl.accel_x" << "adxl.x" << "sensor.accel_x" << "sensor.x";
     } else if (metric == "y") {
-        paths << "y" << "adxl345.y" << "adxl.y" << "sensor.y";
+        paths << "accel_y" << "y" << "adxl345.accel_y" << "adxl345.y" << "adxl.accel_y" << "adxl.y" << "sensor.accel_y" << "sensor.y";
     } else if (metric == "z") {
-        paths << "z" << "adxl345.z" << "adxl.z" << "sensor.z";
+        paths << "accel_z" << "z" << "adxl345.accel_z" << "adxl345.z" << "adxl.accel_z" << "adxl.z" << "sensor.accel_z" << "sensor.z";
     } else if (metric == "cpu_temp") {
-        paths << "cpu_temp" << "cpu.temp" << "system.cpu_temp";
+        paths << "cpu_temp_c" << "cpu_temp" << "cpu.temp" << "system.cpu_temp" << "system.cpu_temp_c";
     } else if (metric == "cpu_load") {
         paths << "cpu_load" << "cpu.load" << "system.cpu_load";
     }
@@ -361,6 +1084,7 @@ void MainWindow::on_connectButton_clicked()
     }
 
     const QString broker = ui->brokerEdit->text().trimmed();
+    const QString brokerForClient = normalizeBrokerUri(broker);
     const QString clientId = ui->clientIdEdit->text().trimmed().isEmpty()
                                  ? QString("qt_gui_%1").arg(QDateTime::currentSecsSinceEpoch())
                                  : ui->clientIdEdit->text().trimmed();
@@ -372,7 +1096,73 @@ void MainWindow::on_connectButton_clicked()
         return;
     }
 
-    const QByteArray brokerUtf8 = broker.toUtf8();
+    QString brokerHint;
+    if (!checkBrokerReachable(broker, &brokerHint)) {
+        appendLog("连接前检查失败：Broker 不可达。 ");
+        appendLog(brokerHint);
+
+        const bool localBroker = isLocalDefaultBroker(broker);
+        if (!localBroker) {
+            const auto choice = QMessageBox::warning(
+                this,
+                "Broker 预检查失败",
+                brokerHint + "\n\n是否仍然尝试连接？",
+                QMessageBox::Yes | QMessageBox::No,
+                QMessageBox::Yes);
+            if (choice == QMessageBox::Yes) {
+                appendLog("用户选择忽略预检查结果，继续尝试 MQTT 连接。 ");
+            } else {
+                appendLog("用户取消连接。 ");
+                return;
+            }
+        }
+
+        if (localBroker) {
+            QMessageBox box(this);
+            box.setIcon(QMessageBox::Warning);
+            box.setWindowTitle("Broker 不可达");
+            box.setText(brokerHint);
+
+            QPushButton *startServiceBtn = nullptr;
+            QPushButton *installServiceBtn = nullptr;
+            QPushButton *copyCmdBtn = nullptr;
+
+            const bool serviceExists = hasMosquittoService();
+
+            startServiceBtn = box.addButton("尝试启动服务", QMessageBox::ActionRole);
+            if (!serviceExists) {
+                installServiceBtn = box.addButton("安装 Mosquitto", QMessageBox::ActionRole);
+            }
+            copyCmdBtn = box.addButton("复制诊断命令", QMessageBox::ActionRole);
+
+            box.addButton(QMessageBox::Ok);
+            box.exec();
+
+            if (box.clickedButton() == startServiceBtn) {
+                runElevatedPowerShell("Start-Service mosquitto");
+                appendLog("已发起管理员命令：Start-Service mosquitto。请授权后重试连接。 ");
+                return;
+            } else if (box.clickedButton() == installServiceBtn) {
+                runElevatedPowerShell("winget install --id EclipseMosquitto.Mosquitto -e --accept-source-agreements --accept-package-agreements; Start-Service mosquitto");
+                appendLog("已发起管理员命令：安装并启动 Mosquitto。请完成后重试连接。 ");
+                return;
+            } else if (box.clickedButton() == copyCmdBtn) {
+                const QString cmds =
+                    "Start-Service mosquitto\n"
+                    "Get-NetTCPConnection -LocalPort 1883 -State Listen\n"
+                    "winget install --id EclipseMosquitto.Mosquitto -e --accept-source-agreements --accept-package-agreements";
+                if (QGuiApplication::clipboard()) {
+                    QGuiApplication::clipboard()->setText(cmds);
+                    appendLog("已复制诊断命令到剪贴板。 ");
+                }
+                return;
+            }
+
+            return;
+        }
+    }
+
+    const QByteArray brokerUtf8 = brokerForClient.toUtf8();
     const QByteArray clientIdUtf8 = clientId.toUtf8();
     const QByteArray userUtf8 = username.toUtf8();
     const QByteArray passUtf8 = password.toUtf8();
@@ -411,8 +1201,9 @@ void MainWindow::on_connectButton_clicked()
     }
 
     connected_ = true;
+    updateConnectionUi(true);
     appendLog(QString("已连接到 %1，客户端 ID：%2").arg(broker, clientId));
-    subscribeToTopic(ui->topicEdit->text());
+    subscribeToTopic(topicCombo_ ? topicCombo_->currentText() : QString());
 }
 
 void delivered(void *context, MQTTClient_deliveryToken dt) {
@@ -434,26 +1225,70 @@ int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *m
         return 1;
     }
 
-    QString payload = QString::fromUtf8((const char*)message->payload, message->payloadlen);
-    emit self->messageSignal(payload);
+    const QString topic = topicName ? QString::fromUtf8(topicName) : QString();
+    const QString payload = QString::fromUtf8((const char*)message->payload, message->payloadlen);
+    emit self->messageSignal(topic, payload);
 
     MQTTClient_freeMessage(&message);
     MQTTClient_free(topicName);
     return 1;
 }
 
-void MainWindow::on_MQTTmessage(QString payload){
-    const QByteArray bytes = payload.toUtf8();
-    bool ok = false;
-    const double value = extractMetricValue(currentMetric_, bytes, &ok);
-    if (!ok) {
-        appendLog(QString("收到 JSON，但未找到指标 '%1'：%2").arg(currentMetric_, payload));
+void MainWindow::on_MQTTmessage(QString topic, QString payload){
+    const QString normalizedTopic = topic.trimmed();
+
+    if (!lwtTopic_.isEmpty() && normalizedTopic == lwtTopic_) {
+        const QString lower = payload.trimmed().toLower();
+        const bool offline = lower.contains("offline") || lower.contains("disconnect") || lower.contains("lost");
+        if (deviceStateLabel_) {
+            if (offline) {
+                deviceStateLabel_->setText("设备状态：离线");
+                deviceStateLabel_->setStyleSheet("QLabel { color: #b42318; font-weight: 700; }");
+            } else {
+                deviceStateLabel_->setText("设备状态：在线");
+                deviceStateLabel_->setStyleSheet("QLabel { color: #027a48; font-weight: 700; }");
+            }
+        }
+        appendLog(QString("遗嘱主题消息：%1").arg(payload));
         return;
     }
 
+    if (!currentTopic_.isEmpty() && normalizedTopic != currentTopic_) {
+        appendLog(QString("收到其他主题消息 '%1'：%2").arg(normalizedTopic, payload));
+        return;
+    }
+
+    const QByteArray bytes = payload.toUtf8();
     const QDateTime ts = extractTimestamp(bytes);
-    pushDataPoint(ts, value);
-    appendLog(QString("指标=%1，数值=%2，主题=%3").arg(currentMetric_).arg(value, 0, 'f', 3).arg(currentTopic_));
+
+    QHash<QString, double> parsedValues;
+    for (const QString &metric : supportedMetricKeys()) {
+        bool ok = false;
+        const double value = extractMetricValue(metric, bytes, &ok);
+        if (!ok) {
+            continue;
+        }
+        parsedValues.insert(metric, value);
+        pushDataPoint(metric, ts, value);
+    }
+
+    if (parsedValues.isEmpty()) {
+        appendLog(QString("收到 JSON，但未识别到可用指标：%1").arg(payload));
+        return;
+    }
+
+    if (!parsedValues.contains(currentMetric_)) {
+        appendLog(QString("收到 JSON，已在后台记录其他指标；当前指标 '%1' 本条无数据。 ").arg(currentMetric_));
+        return;
+    }
+
+    const double value = parsedValues.value(currentMetric_);
+    const QString unit = metricUnit(currentMetric_);
+    const QString valueText = unit.isEmpty() ? QString::number(value, 'f', 3) : QString("%1 %2").arg(value, 0, 'f', 3).arg(unit);
+    appendLog(QString("指标=%1，数值=%2，主题=%3")
+                  .arg(metricDisplayName(currentMetric_))
+                  .arg(valueText)
+                  .arg(normalizedTopic));
 }
 
 void connlost(void *context, char *cause) {
@@ -465,6 +1300,7 @@ void connlost(void *context, char *cause) {
     const QString causeText = cause ? QString::fromUtf8(cause) : QString("unknown");
     QMetaObject::invokeMethod(self, [self, causeText]() {
         self->connected_ = false;
+        self->updateConnectionUi(false);
         self->appendLog(QString("连接已断开：%1").arg(causeText));
     }, Qt::QueuedConnection);
 }
@@ -481,25 +1317,27 @@ void MainWindow::on_disconnectButton_clicked()
     MQTTClient_destroy(&client);
     client = nullptr;
     connected_ = false;
+    subscribedTopics_.clear();
+    updateConnectionUi(false);
+    if (deviceStateLabel_) {
+        deviceStateLabel_->setText("设备状态：未连接");
+        deviceStateLabel_->setStyleSheet("QLabel { color: #475467; font-weight: 700; }");
+    }
     appendLog("已断开连接。 ");
 }
 
 void MainWindow::on_subscribeButton_clicked()
 {
-    subscribeToTopic(ui->topicEdit->text());
+    subscribeToTopic(topicCombo_ ? topicCombo_->currentText() : QString());
 }
 
 void MainWindow::on_metricCombo_currentTextChanged(const QString &text)
 {
     Q_UNUSED(text);
     currentMetric_ = ui->metricCombo->currentData().toString();
-    rollingWindow_.clear();
-    if (ui->customPlot && ui->customPlot->graphCount() > 0 && ui->customPlot->graph(0)) {
-        ui->customPlot->graph(0)->data()->clear();
-    }
-    ui->statsLabel->setText("最近 60 秒统计：平均值=N/A，最小值=N/A，最大值=N/A");
     if (ui->customPlot) {
-        ui->customPlot->replot();
+        ui->customPlot->yAxis->setLabel(metricAxisLabel(currentMetric_));
     }
-    appendLog(QString("已切换指标为 '%1'，图表已重置。 ").arg(currentMetric_));
+    refreshPlotForCurrentMetric();
+    appendLog(QString("已切换指标为 '%1'，已加载后台缓存数据。 ").arg(currentMetric_));
 }
