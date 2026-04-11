@@ -8,6 +8,7 @@
 #include <QStringList>
 #include <QLabel>
 #include <QComboBox>
+#include <QGroupBox>
 #include <QToolButton>
 #include <QPushButton>
 #include <QPlainTextEdit>
@@ -53,7 +54,19 @@ signals:
     void messageSignal(QString topic, QString message);
 
 private:
+    enum class UiLanguage {
+        Chinese,
+        English
+    };
+
     Ui::MainWindow *ui;
+    QString trUi(const QString &zh, const QString &en) const;
+    void applyUiLanguage();
+    void populateMetricCombo();
+    void refreshDeviceStateLabel();
+    QString metricDisplayNameUi(const QString &metric) const;
+    QString metricAxisLabelUi(const QString &metric) const;
+    QString emptyStatsText() const;
     void appendLog(const QString &line);
     void updateConnectionUi(bool connected);
     void setupResponsiveLayout();
@@ -70,6 +83,8 @@ private:
     MQTTClient client;
     volatile MQTTClient_deliveryToken deliveredtoken;
     bool connected_;
+    UiLanguage currentLanguage_;
+    int deviceStateCode_;
     QString currentTopic_;
     QString lwtTopic_;
     QStringList subscribedTopics_;
@@ -77,6 +92,13 @@ private:
     int selectedSubQos_;
     int selectedPubQos_;
     QHash<QString, QQueue<QPair<double, double>>> metricHistory_;
+    QGroupBox *connBox_;
+    QGroupBox *subBox_;
+    QGroupBox *pubBox_;
+    QGroupBox *chartBox_;
+    QGroupBox *logBox_;
+    QLabel *languageLabel_;
+    QComboBox *languageCombo_;
     QLabel *subQosLabel_;
     QComboBox *topicCombo_;
     QComboBox *subQosCombo_;
