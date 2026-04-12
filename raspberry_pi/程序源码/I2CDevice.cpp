@@ -39,10 +39,9 @@ using namespace std;
 namespace een1071 {
 
 /**
- * Constructor for the I2CDevice class. It requires the bus number and device number. The constructor
- * opens a file handle to the I2C device, which is destroyed when the destructor is called
- * @param bus The bus number. Usually 0 or 1 on the BBB
- * @param device The device ID on the bus.
+ * I2CDevice 构造函数。
+ * @param bus I2C 总线号（通常 0 或 1）
+ * @param device 设备地址
  */
 I2CDevice::I2CDevice(unsigned int bus, unsigned int device) {
 	this->file=-1;
@@ -52,8 +51,8 @@ I2CDevice::I2CDevice(unsigned int bus, unsigned int device) {
 }
 
 /**
- * Open a connection to an I2C device
- * @return 1 on failure to open to the bus or device, 0 on success.
+ * 打开 I2C 设备连接。
+ * @return 0 成功，1 失败
  */
 int I2CDevice::open(){
    string name;
@@ -72,10 +71,10 @@ int I2CDevice::open(){
 }
 
 /**
- * Write a single byte value to a single register.
- * @param registerAddress The register address
- * @param value The value to be written to the register
- * @return 1 on failure to write, 0 on success.
+ * 向寄存器写入一个字节。
+ * @param registerAddress 寄存器地址
+ * @param value 要写入的值
+ * @return 0 成功，1 失败
  */
 
 int I2CDevice::writeRegister(unsigned int registerAddress, unsigned char value){
@@ -90,10 +89,9 @@ int I2CDevice::writeRegister(unsigned int registerAddress, unsigned char value){
 }
 
 /**
- * Write a single value to the I2C device. Used to set up the device to read from a
- * particular address.
- * @param value the value to write to the device
- * @return 1 on failure to write, 0 on success.
+ * 向 I2C 设备写入一个字节（常用于设置读起始地址）。
+ * @param value 写入值
+ * @return 0 成功，1 失败
  */
 int I2CDevice::write(unsigned char value){
    unsigned char buffer[1];
@@ -106,9 +104,9 @@ int I2CDevice::write(unsigned char value){
 }
 
 /**
- * Read a single register value from the address on the device.
- * @param registerAddress the address to read from
- * @return the byte value at the register address.
+ * 读取单个寄存器。
+ * @param registerAddress 寄存器地址
+ * @return 读取到的字节值
  */
 unsigned char I2CDevice::readRegister(unsigned int registerAddress){
    this->write(registerAddress);
@@ -121,12 +119,10 @@ unsigned char I2CDevice::readRegister(unsigned int registerAddress){
 }
 
 /**
- * Method to read a number of registers from a single device. This is much more efficient than
- * reading the registers individually. The from address is the starting address to read from, which
- * defaults to 0x00.
- * @param number the number of registers to read from the device
- * @param fromAddress the starting address to read from
- * @return a pointer of type unsigned char* that points to the first element in the block of registers
+ * 连续读取多个寄存器。
+ * @param number 读取字节数
+ * @param fromAddress 起始寄存器地址（默认 0x00）
+ * @return 指向读取缓冲区首地址的指针
  */
 unsigned char* I2CDevice::readRegisters(unsigned int number, unsigned int fromAddress){
 	this->write(fromAddress);
@@ -139,11 +135,8 @@ unsigned char* I2CDevice::readRegisters(unsigned int number, unsigned int fromAd
 }
 
 /**
- * Method to dump the registers to the standard output. It inserts a return character after every
- * 16 values and displays the results in hexadecimal to give a standard output using the HEX() macro
- * that is defined at the top of this file. The standard output will stay in hexadecimal format, hence
- * the call on the last like.
- * @param number the total number of registers to dump, defaults to 0xff
+ * 以十六进制打印寄存器内容，便于调试。
+ * @param number 打印长度，默认 0xff
  */
 
 void I2CDevice::debugDumpRegisters(unsigned int number){
@@ -157,7 +150,7 @@ void I2CDevice::debugDumpRegisters(unsigned int number){
 }
 
 /**
- * Close the file handles and sets a temporary state to -1.
+ * 关闭设备文件并将句柄置为 -1。
  */
 void I2CDevice::close(){
 	::close(this->file);
@@ -165,7 +158,7 @@ void I2CDevice::close(){
 }
 
 /**
- * Closes the file on destruction, provided that it has not already been closed.
+ * 析构时自动关闭设备文件（若仍处于打开状态）。
  */
 I2CDevice::~I2CDevice() {
 	if(file!=-1) this->close();

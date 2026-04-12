@@ -14,7 +14,7 @@
 #include <QPlainTextEdit>
 #include "MQTTClient.h"
 
-// --- MQTT Configuration Constants ---
+// MQTT 默认配置常量
 #define DEFAULT_ADDRESS     "mqtt://192.168.127.152:1884"
 #define DEFAULT_CLIENTID    "qt"
 #define DEFAULT_AUTHMETHOD  "fangkuai"
@@ -26,13 +26,13 @@
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
-class MainWindow; // Forward declaration of the UI class generated from mainwindow.ui
+class MainWindow; // mainwindow.ui 生成的 UI 类前向声明
 }
 QT_END_NAMESPACE
 
 /**
  * @class MainWindow
- * @brief The main interface class handling UI logic and MQTT communication.
+ * @brief 主界面类，负责 UI 交互与 MQTT 通信。
  */
 class MainWindow : public QMainWindow
 {

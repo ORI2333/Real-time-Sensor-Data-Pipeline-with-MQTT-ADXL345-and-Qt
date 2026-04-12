@@ -32,7 +32,7 @@ namespace een1071 {
 
 /**
  * @class I2CDevice
- * @brief Generic I2C Device class that can be used to connect to any type of I2C device and read or write to its registers
+ * @brief 通用 I2C 设备类，用于设备连接与寄存器读写。
  */
 class I2CDevice{
 private:

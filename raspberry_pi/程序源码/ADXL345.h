@@ -26,32 +26,31 @@
 #define ADXL345_H_
 #include"I2CDevice.h"
 
-/// The ADXL345 has 0x40 registers (0x01 to 0x1C are reserved and should not be accessed)
+/// ADXL345 寄存器空间大小（0x01~0x1C 为保留区）
 #define BUFFER_SIZE 0x40
 
 namespace een1071 {
 
 /**
  * @class ADXL345
- * @brief Specific class for the ADXL345 Accelerometer that is a child of the I2CDevice class
- * Protected inheritance means that the public I2CDevice methods are not publicly accessible
- * by an object of the ADXL345 class.
+ * @brief ADXL345 传感器封装类，继承自 I2CDevice。
+ * 使用 protected 继承，避免直接暴露底层 I2C 公共接口。
  */
 class ADXL345:protected I2CDevice{
 
 public:
 
-	/// An enumeration to define the gravity range of the sensor
+	/// 传感器量程枚举
 	enum RANGE {
-		PLUSMINUS_2_G 		= 0,//!< plus/minus 2g
-		PLUSMINUS_4_G 		= 1,//!< plus/minus 4g
-		PLUSMINUS_8_G 		= 2,//!< plus/minus 8g
-		PLUSMINUS_16_G 		= 3 //!< plus/minus 16g
+		PLUSMINUS_2_G 		= 0,//!< +-2g
+		PLUSMINUS_4_G 		= 1,//!< +-4g
+		PLUSMINUS_8_G 		= 2,//!< +-8g
+		PLUSMINUS_16_G 		= 3 //!< +-16g
 	};
-	/// The resolution of the sensor. High is only available in +/- 16g range.
+	/// 传感器分辨率枚举（高分辨率通常配合 +-16g 使用）
 	enum RESOLUTION {
-		NORMAL = 0,//!< NORMAL 10-bit resolution
-		HIGH = 1   //!< HIGH 13-bit resolution
+		NORMAL = 0,//!< 普通 10 位分辨率
+		HIGH = 1   //!< 高精度 13 位分辨率
 	};
 
 private:
@@ -59,8 +58,8 @@ private:
 	unsigned char *registers;
 	ADXL345::RANGE range;
 	ADXL345::RESOLUTION resolution;
-	short accelerationX, accelerationY, accelerationZ; // raw 2's complement values
-	float pitch, roll;                                 // in degrees
+	short accelerationX, accelerationY, accelerationZ; // 原始二补码加速度值
+	float pitch, roll;                                 // 姿态角（度）
 	short combineRegisters(unsigned char msb, unsigned char lsb);
 	void calculatePitchAndRoll();
 	virtual int updateRegisters();
@@ -80,7 +79,7 @@ public:
 	virtual float getPitch() { return pitch; }
 	virtual float getRoll() { return roll; }
 
-	// Debugging method to display and update the pitch/roll on the one line
+	// 调试方法：在一行中持续输出 pitch/roll
 	virtual void displayPitchAndRoll(int iterations = 600);
 	virtual ~ADXL345();
 };
