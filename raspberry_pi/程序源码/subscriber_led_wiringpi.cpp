@@ -7,13 +7,13 @@
 #include <atomic>
 #include "MQTTClient.h"
 
-// 先取消 HIGH 宏，再包含 ADXL345.h
+// Undefine HIGH first, then include ADXL345.h
 #ifdef HIGH
 #undef HIGH
 #endif
 #include "ADXL345.h"
 
-#include <wiringPi.h>   // 这个头文件会重新定义 HIGH 宏
+#include <wiringPi.h>   // This header redefines the HIGH macro
 
 using namespace een1071;
 
@@ -72,7 +72,7 @@ int main() {
         return -1;
     }
     sensor.setRange(ADXL345::PLUSMINUS_16_G);
-    // 使用数值 1 代替枚举 HIGH，避免宏冲突
+    // Use numeric value 1 instead of enum HIGH to avoid macro conflict
     sensor.setResolution(static_cast<ADXL345::RESOLUTION>(1));
 
     MQTTClient_create(&mqtt_client_handle, ADDRESS, CLIENTID, MQTTCLIENT_PERSISTENCE_NONE, NULL);
@@ -102,7 +102,7 @@ int main() {
             if (level != last_level) {
                 set_led(level);
                 last_level = level;
-                // 可选打印
+                // Optional debug output
                  printf("Pitch: %.2f, Level: %d\n", pitch, level);
                 // fflush(stdout);
             }

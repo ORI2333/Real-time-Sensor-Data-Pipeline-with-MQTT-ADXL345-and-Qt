@@ -1,11 +1,12 @@
-# 自定义应用图标
+# Custom Application Icon
 
-将以下任一文件放置在指定路径，重启应用后即可生效：
+Place either file below, then restart the app to apply:
 
 - assets/app_icon.ico
 - assets/app_icon.png
 
-说明：
+Notes:
 
-- 优先加载 `.ico`，其次 `.png`。
-- 调试/运行时会自动在应用目录和项目目录的 `assets/` 中查找。
+- `.ico` is preferred; `.png` is used as fallback.
+- During debug/runtime, the app searches `assets/` under both app and project directories.
+- Chinese backup is preserved as `assets/README_zh.md`.

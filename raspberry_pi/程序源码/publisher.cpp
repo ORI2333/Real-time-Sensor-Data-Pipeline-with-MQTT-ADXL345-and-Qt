@@ -21,7 +21,7 @@ using namespace een1071;
 #define PASSWORD    "2120033"
 #define TIMEOUT     10000L
 
-// 遗嘱消息配置
+// Last Will configuration
 #define WILL_TOPIC  "sensor/adxl345/status"
 #define WILL_PAYLOAD "offline"
 #define WILL_QOS    1
@@ -75,7 +75,7 @@ std::string build_json(float pitch, float roll, short ax, short ay, short az,
 }
 
 int main(int argc, char* argv[]) {
-    // 检查命令行参数：指定 QoS 等级
+    // Validate CLI argument: requested QoS level
     if (argc != 2) {
         std::cerr << "用法: " << argv[0] << " <QoS等级> (0, 1 或 2)" << std::endl;
         return -1;
@@ -87,7 +87,7 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "使用 QoS " << qos << " 发布消息" << std::endl;
 
-    // 初始化 ADXL345
+    // Initialize ADXL345
     ADXL345 sensor(1, 0x53);
     if (sensor.readSensorState() != 0) {
         std::cerr << "ADXL345 初始化失败" << std::endl;
@@ -96,7 +96,7 @@ int main(int argc, char* argv[]) {
     sensor.setRange(ADXL345::PLUSMINUS_16_G);
     sensor.setResolution(ADXL345::HIGH);
 
-    // MQTT 客户端
+    // MQTT client setup
     MQTTClient client;
     MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
     MQTTClient_willOptions will_opts = MQTTClient_willOptions_initializer;
@@ -105,7 +105,7 @@ int main(int argc, char* argv[]) {
 
     MQTTClient_create(&client, ADDRESS, CLIENTID, MQTTCLIENT_PERSISTENCE_NONE, NULL);
 
-    // 设置遗嘱消息
+    // Configure Last Will message
     will_opts.topicName = WILL_TOPIC;
     will_opts.message = WILL_PAYLOAD;
     will_opts.retained = WILL_RETAIN;
@@ -123,7 +123,7 @@ int main(int argc, char* argv[]) {
     }
     printf("MQTT 连接成功，发布者已上线\n");
 
-    // 发布保留的“在线”状态消息
+    // Publish retained "online" status
     MQTTClient_message status_msg = MQTTClient_message_initializer;
     status_msg.payload = (void*)"online";
     status_msg.payloadlen = 6;
@@ -132,7 +132,7 @@ int main(int argc, char* argv[]) {
     MQTTClient_publishMessage(client, WILL_TOPIC, &status_msg, &token);
     MQTTClient_waitForCompletion(client, token, TIMEOUT);
 
-    // 主循环：每 2 秒读取传感器并发布
+    // Main loop: read sensor and publish every 2 seconds
     int count = 0;
     while (true) {
         if (sensor.readSensorState() != 0) {
@@ -152,7 +152,7 @@ int main(int argc, char* argv[]) {
         std::string payload = build_json(pitch, roll, ax, ay, az, cpu_load, cpu_temp, ts);
         printf("[%s] 发布: %s\n", ts.c_str(), payload.c_str());
 
-        // 使用命令行指定的 QoS
+        // Use QoS passed from command line
         pubmsg.payload = (void*)payload.c_str();
         pubmsg.payloadlen = payload.length();
         pubmsg.qos = qos;
@@ -169,7 +169,7 @@ int main(int argc, char* argv[]) {
         std::this_thread::sleep_for(std::chrono::seconds(2));
     }
 
-    // 正常断开前手动发送 offline 消息
+    // Send offline status before graceful disconnect
     status_msg.payload = (void*)"offline";
     status_msg.payloadlen = 7;
     MQTTClient_publishMessage(client, WILL_TOPIC, &status_msg, &token);
