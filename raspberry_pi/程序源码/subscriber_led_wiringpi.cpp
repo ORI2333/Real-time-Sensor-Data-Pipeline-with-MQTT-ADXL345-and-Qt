@@ -13,7 +13,7 @@
 #endif
 #include "ADXL345.h"
 
-#include <wiringPi.h>   // 该头文件会重新定义 HIGH 宏
+#include <wiringPi.h>   // 这个头文件会重新定义 HIGH 宏
 
 using namespace een1071;
 
@@ -23,9 +23,9 @@ using namespace een1071;
 #define USERNAME    "fangkuai"
 #define PASSWORD    "2120033"
 
-#define LED_LOW     0   // WiringPi 0 对应 BCM 17
-#define LED_MED     2   // WiringPi 2 对应 BCM 27
-#define LED_HIGH    3   // WiringPi 3 对应 BCM 22
+#define LED_LOW     0   // WiringPi 0 -> BCM 17
+#define LED_MED     2   // WiringPi 2 -> BCM 27
+#define LED_HIGH    3   // WiringPi 3 -> BCM 22
 
 std::atomic<bool> running(true);
 MQTTClient mqtt_client_handle;
@@ -102,7 +102,7 @@ int main() {
             if (level != last_level) {
                 set_led(level);
                 last_level = level;
-                // 调试时可打开打印
+                // 可选打印
                  printf("Pitch: %.2f, Level: %d\n", pitch, level);
                 // fflush(stdout);
             }

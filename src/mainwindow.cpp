@@ -213,8 +213,8 @@ void runElevatedPowerShell(const QString &command)
 }
 
 /**
- * @brief MainWindow 构造函数。
- * 初始化界面、图表和内部信号连接。
+ * @brief Constructor for MainWindow.
+ * Initializes the UI, sets up the real-time graph, and connects internal signals.
  */
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
@@ -523,7 +523,7 @@ MainWindow::MainWindow(QWidget *parent) :
     applyUiLanguage();
     setupPlot();
 
-    // 确保窗口在主屏幕可见并获得焦点。
+    // Ensure the window is visible on the primary display and focused.
     if (QGuiApplication::primaryScreen()) {
         const QRect area = QGuiApplication::primaryScreen()->availableGeometry();
         const QSize s = size();

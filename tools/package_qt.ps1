@@ -103,14 +103,14 @@ New-Item -ItemType Directory -Path $packageDir | Out-Null
 
 Copy-Item $exePath (Join-Path $packageDir $packageExeName) -Force
 
-# 收集便携包所需的 Qt 运行时依赖。
+# Collect Qt runtime dependencies for a portable package.
 & $windeployqt --release --no-translations --compiler-runtime (Join-Path $packageDir $packageExeName)
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "windeployqt failed, using fallback runtime copy."
     Copy-QtRuntimeFallback -TargetDir $packageDir
 }
 
-# 如存在 MQTT 运行时 DLL，则一并拷贝。
+# Copy MQTT runtime DLLs if present.
 $copiedPaho = @()
 if (Test-Path $pahoBin) {
     Get-ChildItem $pahoBin -Filter "*.dll" -ErrorAction SilentlyContinue | ForEach-Object {

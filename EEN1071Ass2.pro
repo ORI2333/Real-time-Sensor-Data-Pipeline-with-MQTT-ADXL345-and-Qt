@@ -1,39 +1,40 @@
 #-------------------------------------------------------------------------
-# EEN1071 项目配置文件
-# 该文件定义 qmake 使用的模块、源码与链接库。
+# EEN1071 Assignment 2 - Project Configuration File
+# This file defines the modules, source files, and libraries used by qmake.
 #-------------------------------------------------------------------------
 
-# 添加核心 Qt 模块（逻辑与界面）
+# Add essential Qt modules: core logic and GUI elements
 QT       += core gui widgets printsupport network
 
-# 显式添加 widgets，兼容较新 Qt 版本
+# Ensure compatibility with newer Qt versions by explicitly adding the widgets module
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
-# 使用 C++17 标准
+# Set the C++ standard to C++17 for modern features and syntax
 CONFIG += c++17
 CONFIG += utf8_source
 
-# MinGW 下统一使用 UTF-8，避免中文乱码
+# Keep source and runtime narrow strings in UTF-8 on MinGW to avoid Chinese mojibake.
 win32-g++ {
     QMAKE_CFLAGS   += -finput-charset=UTF-8 -fexec-charset=UTF-8
     QMAKE_CXXFLAGS += -finput-charset=UTF-8 -fexec-charset=UTF-8
 }
 
-# 如需限制过时 Qt API，可启用下一行
+# Uncommenting the line below helps maintain code quality by preventing
+# the use of outdated (deprecated) Qt functions.
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000
 
-# 需要编译的 C++ 源文件
+# List of all C++ source files to be compiled into the application
 SOURCES += \
     src/main.cpp \
     src/mainwindow.cpp \
     src/qcustomplot.cpp
 
-# 头文件列表
+# List of header files containing class definitions and declarations
 HEADERS += \
     include/mainwindow.h \
     include/qcustomplot.h
 
-# Qt Designer 生成的 UI 文件
+# The XML-based UI file designed in Qt Designer
 FORMS += \
     ui/mainwindow.ui
 
@@ -46,10 +47,11 @@ win32 {
     RC_ICONS = assets/app_icon.ico
 }
 
-# 外部库链接：Paho MQTT C 客户端库
+# External Library Linking: Links the Paho MQTT C client library
+# (Required for IoT/Messaging functionality in this assignment)
 LIBS  += -lpaho-mqtt3c
 
-# 部署规则：定义不同系统下的安装路径
+# Deployment rules: Defines where the binary is installed on different OS targets
 qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target

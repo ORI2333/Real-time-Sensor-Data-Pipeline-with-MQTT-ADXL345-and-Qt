@@ -32,50 +32,53 @@ using namespace std;
 
 namespace een1071 {
 
-// ADXL345 常用寄存器定义（参考数据手册）
-#define DEVID          0x00   // 设备 ID
-#define THRESH_TAP     0x1D   // 轻敲阈值
-#define OFSX           0x1E   // X 轴偏移
-#define OFSY           0x1F   // Y 轴偏移
-#define OFSZ           0x20   // Z 轴偏移
-#define DUR            0x21   // 轻敲持续时间
-#define LATENT         0x22   // 轻敲延迟
-#define WINDOW         0x23   // 轻敲窗口
-#define THRESH_ACT     0x24   // 活动阈值
-#define THRESH_INACT   0x25   // 静止阈值
-#define TIME_INACT     0x26   // 静止时间
-#define ACT_INACT_CTL  0x27   // 活动/静止轴使能
-#define THRESH_FF      0x28   // 自由落体阈值
-#define TIME_FF        0x29   // 自由落体时间
-#define TAP_AXES       0x2A   // 轻敲轴配置
-#define ACT_TAP_STATUS 0x2B   // 轻敲状态来源
-#define BW_RATE        0x2C   // 带宽与速率配置
-#define POWER_CTL      0x2D   // 电源控制
-#define INT_ENABLE     0x2E   // 中断使能
-#define INT_MAP        0x2F   // 中断映射
-#define INT_SOURCE     0x30   // 中断来源
-#define DATA_FORMAT    0x31   // 数据格式配置
-#define DATAX0         0x32   // X 轴低字节
-#define DATAX1         0x33   // X 轴高字节
-#define DATAY0         0x34   // Y 轴低字节
-#define DATAY1         0x35   // Y 轴高字节
-#define DATAZ0         0x36   // Z 轴低字节
-#define DATAZ1         0x37   // Z 轴高字节
-#define FIFO_CTL       0x38   // FIFO 控制
-#define FIFO_STATUS    0x39   // FIFO 状态
+//From Table 19. of the ADXL345 Data sheet
+#define DEVID          0x00   //Device ID
+#define THRESH_TAP     0x1D   //Tap Threshold
+#define OFSX           0x1E   //X-axis Offset
+#define OFSY           0x1F   //Y-axis Offset
+#define OFSZ           0x20   //Z-axis Offset
+#define DUR            0x21   //Tap duration
+#define LATENT         0x22   //Tap latency
+#define WINDOW         0x23   //Tap window
+#define THRESH_ACT     0x24   //Activity threshold
+#define THRESH_INACT   0x25   //Threshold inactivity
+#define TIME_INACT     0x26   //Inactivity time
+#define ACT_INACT_CTL  0x27   //Axis enable control for activity and inactivity detection
+#define THRESH_FF      0x28   //Free-fall threshold
+#define TIME_FF        0x29   //Free-fall time
+#define TAP_AXES       0x2A   //Axis control for single tap/double tap
+#define ACT_TAP_STATUS 0x2B   //Source of single tap/double tap
+#define BW_RATE        0x2C   //Data rate and power mode control
+#define POWER_CTL      0x2D   //Power-saving features control
+#define INT_ENABLE     0x2E   //Interrupt enable control
+#define INT_MAP        0x2F   //Interrupt mapping control
+#define INT_SOURCE     0x30   //Source of interrupts
+#define DATA_FORMAT    0x31   //Data format control
+#define DATAX0         0x32   //X-axis Data 0
+#define DATAX1         0x33   //X-axis Data 1
+#define DATAY0         0x34   //Y-axis Data 0
+#define DATAY1         0x35   //Y-axis Data 1
+#define DATAZ0         0x36   //Z-axis Data 0
+#define DATAZ1         0x37   //Z-axis Data 1
+#define FIFO_CTL       0x38   //FIFO control
+#define FIFO_STATUS    0x39   //FIFO status
 
 /**
- * 将两个 8 位寄存器拼成一个 16 位有符号值。
- * @param msb 高字节
- * @param lsb 低字节
+ * Method to combine two 8-bit registers into a single short, which is 16-bits on the BBB. It shifts
+ * the MSB 8-bits to the left and then ORs the result with the LSB.
+ * @param msb an unsigned character that contains the most significant byte
+ * @param lsb an unsigned character that contains the least significant byte
  */
 short ADXL345::combineRegisters(unsigned char msb, unsigned char lsb){
-	 // 高字节左移后与低字节合并
+   //shift the MSB left by 8 bits and OR with LSB
    return ((short)msb<<8)|(short)lsb;
 }
 
 /**
- * 根据加速度值计算 pitch/roll（单位：度）。
+ * Method to calculate the pitch and roll state values. This calculation takes account of the scaling
+ * factors due to the resolution and gravity range to determine gravity weighted values that are used
+ * to calculate the angular pitch and roll values in degrees.
  */
 void ADXL345::calculatePitchAndRoll(){
 	float gravity_range;
@@ -86,7 +89,7 @@ void ADXL345::calculatePitchAndRoll(){
 		default: gravity_range=4.0f; break;
 	}
     float resolution = 1024.0f;
-	if (this->resolution==ADXL345::HIGH) resolution = 8192.0f; // 13 位分辨率
+    if (this->resolution==ADXL345::HIGH) resolution = 8192.0f; //13-bit resolution
     float factor = gravity_range/resolution;
 
     float accXg = this->accelerationX * factor;
@@ -100,25 +103,28 @@ void ADXL345::calculatePitchAndRoll(){
 }
 
 /**
- * 更新数据格式寄存器。
- * @return 0 表示更新成功
+ * Method used to update the DATA_FORMAT register and any other registers that might be added
+ * in the future.
+ * @return 0 if the register is updated successfully
  */
 int ADXL345::updateRegisters(){
-	 // 组装 DATA_FORMAT 位字段
-	 char data_format = 0x00;  // 默认 +-2g，普通分辨率
-	 // FULL_RES 位在 bit3
+   //update the DATA_FORMAT register
+   char data_format = 0x00;  //+/- 2g with normal resolution
+   //Full_resolution is the 3rd LSB
    data_format = data_format|((this->resolution)<<3);
-	 data_format = data_format|this->range; // 量程位在 bit0/bit1
+   data_format = data_format|this->range; // 1st and 2nd LSB therefore no shift
    return this->writeRegister(DATA_FORMAT, data_format);
 }
 
 /**
- * 构造函数：初始化总线、地址和默认工作模式。
- * @param I2CBus I2C 总线号（通常 0 或 1）
- * @param I2CAddress 设备地址（默认 0x53）
+ * The constructor for the ADXL345 accelerometer object. It passes the bus number and the
+ * device address (with is 0x53 by default) to the constructor of I2CDevice. All of the states
+ * are initialized and the registers are updated.
+ * @param I2CBus The bus number that the ADXL345 device is on - typically 0 or 1
+ * @param I2CAddress The address of the ADLX345 device (default 0x53, but can be altered)
  */
 ADXL345::ADXL345(unsigned int I2CBus, unsigned int I2CAddress):
-	I2CDevice(I2CBus, I2CAddress){   // 初始化列表中调用父类构造
+	I2CDevice(I2CBus, I2CAddress){   // this member initialisation list calls the parent constructor
 	this->I2CAddress = I2CAddress;
 	this->I2CBus = I2CBus;
 	this->accelerationX = 0;
@@ -134,8 +140,10 @@ ADXL345::ADXL345(unsigned int I2CBus, unsigned int I2CAddress):
 }
 
 /**
- * 读取传感器当前状态，并刷新加速度与姿态角。
- * @return 0 表示读取成功，-1 表示设备校验失败
+ * Read the sensor state. This method checks that the device is being correctly
+ * read by using the device ID of the ADXL345 sensor. It will read in the accelerometer registers
+ * and pass them to the combineRegisters() method to be processed.
+ * @return 0 if the registers are successfully read and -1 if the device ID is incorrect.
  */
 int ADXL345::readSensorState(){
 	this->registers = this->readRegisters(BUFFER_SIZE, 0x00);
@@ -153,8 +161,8 @@ int ADXL345::readSensorState(){
 }
 
 /**
- * 设置量程。
- * @param range 目标量程
+ * Set the ADXL345 gravity range according to the RANGE enumeration
+ * @param range One of the four possible gravity ranges defined by the RANGE enumeration
  */
 void ADXL345::setRange(ADXL345::RANGE range) {
 	this->range = range;
@@ -162,8 +170,8 @@ void ADXL345::setRange(ADXL345::RANGE range) {
 }
 
 /**
- * 设置分辨率。
- * @param resolution HIGH 或 NORMAL
+ * Set the ADXL345 resolution according to the RESOLUTION enumeration
+ * @param resolution either HIGH or NORMAL resolution. HIGH resolution is only available if the range is set to +/- 16g
  */
 void ADXL345::setResolution(ADXL345::RESOLUTION resolution) {
 	this->resolution = resolution;
@@ -171,8 +179,8 @@ void ADXL345::setResolution(ADXL345::RESOLUTION resolution) {
 }
 
 /**
- * 调试输出：循环打印 pitch/roll。
- * @param iterations 循环次数（每次约 0.1s）
+ * Useful debug method to display the pitch and roll values in degrees on a single standard output line
+ * @param iterations The number of 0.1s iterations to take place.
  */
 void ADXL345::displayPitchAndRoll(int iterations){
 	int count = 0;

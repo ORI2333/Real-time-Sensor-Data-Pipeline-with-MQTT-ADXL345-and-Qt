@@ -1,7 +1,8 @@
 /**
  * @file main.cpp
- * @brief 程序入口文件。
- * 负责初始化 Qt、创建主窗口并启动事件循环。
+ * @brief Entry point for the EEN1071 Assignment 2 application.
+ * * This file handles the initial startup of the Qt framework,
+ * instantiates the main window, and starts the event loop.
  */
 
 #include "mainwindow.h"
@@ -51,7 +52,8 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
-    // 创建 Qt 应用对象，负责 GUI 生命周期管理。
+    // QApplication manages GUI application control flow and main settings.
+    // It handles initialization and finalization.
     QApplication a(argc, argv);
 
     const QString iconPath = findAppIconPath();
@@ -59,12 +61,13 @@ int main(int argc, char *argv[]) {
         a.setWindowIcon(QIcon(iconPath));
     }
 
-    // 创建主窗口对象。
+    // Instantiate the MainWindow object defined in mainwindow.h
     MainWindow w;
 
-    // 显示主窗口。
+    // By default, widgets are hidden. show() makes the window visible to the user.
     w.show();
 
-    // 进入事件循环，直到程序退出。
+    // Enters the main event loop and waits until exit() is called.
+    // The return value ensures the OS receives the correct exit status.
     return a.exec();
 }

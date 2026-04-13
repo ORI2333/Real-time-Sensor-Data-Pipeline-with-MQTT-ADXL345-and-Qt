@@ -10,7 +10,7 @@ if (!(Test-Path $buildDir)) {
 
 Set-Location $buildDir
 
-# 运行中的 GUI 会占用 exe，导致链接失败。
+# A running GUI process will lock the output exe and make linking fail.
 $running = Get-Process -Name "EEN1071Ass2" -ErrorAction SilentlyContinue
 if ($running) {
     Write-Host "Stopping running EEN1071Ass2 instances before build..."
@@ -33,7 +33,7 @@ if ($LASTEXITCODE -ne 0) {
 
 & $makeExe -j4
 if ($LASTEXITCODE -ne 0) {
-    # 文件锁冲突时再重试一次。
+    # Retry once for transient file lock situations.
     $running = Get-Process -Name "EEN1071Ass2" -ErrorAction SilentlyContinue
     if ($running) {
         Write-Host "Build failed; retrying after stopping EEN1071Ass2..."
